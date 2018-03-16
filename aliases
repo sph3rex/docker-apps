@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+__local_path() { # Internal. Tries to be a reliable way to determine the directory of sourced script
+    if test -n "$BASH" ; then script=$BASH_SOURCE
+    elif test -n "$TMOUT"; then script=${.sh.file}
+    elif test -n "$ZSH_NAME" ; then script=${(%):-%x}
+    elif test ${0##*/} = dash; then x=$(lsof -p $$ -Fn0 | tail -1); script=${x#n}
+    else script=$0
+    fi
+
+    echo $(dirname $(realpath "${script}"))
+}
+
+__bold() { # Internal helper function to bold some text
+    bold=$(tput bold)
+    normal=$(tput sgr0)
+    echo $bold"$@"$normal
+}
+
+__rebuild_when_needed() { # Internal. Checks if build is needed and if so, it builds the image.
+    checksum=$(shasum "$2/Dockerfile" | awk '{ print $1 }') # Calculate dockerfile checksum
+    image_exists=$(docker images --filter reference="$1:$checksum" --format "{{ .Tag }}" | wc -l)
+
+    if [ $image_exists == 0 ]; then
+        (docker build -t "$1:$checksum" "$2" &>/dev/null)
+    fi
+
+    echo ${checksum}
+}
+
+export DOCKER_APPS_HOME_FOLDER=$(__local_path) # Export current script path
+
+docker-json2yaml() { # Convert json to yaml || docker
+    local context_name="json2yaml"
+    local context="${DOCKER_APPS_HOME_FOLDER}/${context_name}"
+
+    tag=$(__rebuild_when_needed "${context_name}" "${context}")
+
+    OVERRIDEN_ENTRYPOINT=''
+    if [[ "$1" == '--reverse' ]]; then
+        OVERRIDEN_ENTRYPOINT='--entrypoint /code/json2yaml/yaml2json'
+        shift;
+    fi
+    echo "$OVERRIDEN_ENTRYPOINT"
+
+    ARGS="$@"
+    if [[ -z $ARGS ]]; then
+        docker run \
+            --rm \
+            --user $(id -u):$(id -g) \
+            --interactive \
+            ${OVERRIDEN_ENTRYPOINT} \
+        "json2yaml:${tag}"
+    else
+        docker run \
+            --rm \
+            --user $(id -u):$(id -g) \
+            --workdir $PWD \
+            --volume $PWD:$PWD \
+            --interactive \
+            ${OVERRIDEN_ENTRYPOINT} \
+        "json2yaml:${tag}" $ARGS
+    fi
+}
+
+docker-serverless() { # Start a serveless docker instance || docker
+    local context_name="serverless"
+    local context="${DOCKER_APPS_HOME_FOLDER}/${context_name}"
+    project=$(basename $PWD)
+
+    tag=$(__rebuild_when_needed "${context_name}" "${context}")
+
+    echo " --- Running serverless for project "$(__bold $project)
+    echo " --- with args: $@"
+    docker run \
+        --rm \
+        --name "${context_name}-runner-${project}" \
+        --volume $PWD:$PWD \
+        --workdir $PWD \
+        --init \
+        --interactive \
+        --user $(id -u):$(id -g) \
+        --env-file $(realpath "$context/../config/aws_creds") \
+    "${context_name}:${tag}" $@
+}
+
+
+docker-aws-logs() { # Start a awslogs docker instance || docker
+    local context_name="aws-logs"
+    local context="${DOCKER_APPS_HOME_FOLDER}/${context_name}"
+
+    tag=$(__rebuild_when_needed "${context_name}" "${context}")
+
+    ARGS="$@"
+    echo " --- AWSLogs Args: $ARGS"
+    docker run \
+        --rm \
+        --name "${context_name}-${RANDOM}" \
+        --user $(id -u):$(id -g) \
+        --env-file $(realpath "$context/../config/aws_creds") \
+        --interactive \
+        --init \
+        "${context_name}:${tag}" $ARGS
+}
+
+docker-aws-cli() { # Start a awslogs docker instance || docker
+    local context_name="aws-cli"
+    local context="${DOCKER_APPS_HOME_FOLDER}/${context_name}"
+
+    tag=$(__rebuild_when_needed "${context_name}" "${context}")
+
+    ARGS="$@"
+    docker run \
+        --rm \
+        --name "${context_name}-${RANDOM}" \
+        --user $(id -u):$(id -g) \
+        --env-file $(realpath "$context/../config/aws_creds") \
+        --interactive \
+        --init \
+        "${context_name}:${tag}" $ARGS
+}
+
+docker-jq() { # Start a awslogs docker instance || docker
+    local context_name="jq"
+    local context="${DOCKER_APPS_HOME_FOLDER}/${context_name}"
+
+    tag=$(__rebuild_when_needed "${context_name}" "${context}")
+
+    ARGS="$@"
+    docker run \
+        --rm \
+        --name "${context_name}-${RANDOM}" \
+        --user $(id -u):$(id -g) \
+        --interactive \
+        --env-file $(realpath "$context/../config/aws_creds") \
+        "${context_name}:${tag}" $ARGS
+}
+
+docker-nodejs() { # Run nodejs || docker
+    docker run \
+        --rm \
+        --name "nodejs" \
+        --volume $PWD:$PWD \
+        --workdir $PWD \
+        --interactive \
+        --user $(id -u):$(id -g) \
+    node:9 node "$@"
+}
+
+docker-npm() { # Run npm || docker
+    docker run \
+        --rm \
+        --name "nodejs" \
+        --volume $PWD:$PWD \
+        --workdir $PWD \
+        --interactive \
+        --user $(id -u):$(id -g) \
+    node:8 npm "$@"
+}
+
+alias slsd="docker-serverless"
+alias jqd="docker-jq"
+alias json2yamld="docker-json2yaml"
+alias noded="docker-nodejs"
+alias npmd="docker-npm"
+alias awslogsd="docker-aws-logs"
