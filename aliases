@@ -160,6 +160,7 @@ docker-npm() { # Run npm || docker
 alias slsd="docker-serverless"
 alias jqd="docker-jq"
 alias json2yamld="docker-json2yaml"
+alias yaml2jsond="docker-json2yaml --reverse"
 alias noded="docker-nodejs"
 alias npmd="docker-npm"
 alias awslogsd="docker-aws-logs"
